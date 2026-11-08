@@ -64,3 +64,19 @@ def test_static_letter_variables_do_not_interpret_arbitrary_braces():
 def test_ai_key_needed_before_network():
     with pytest.raises(ValueError,match="API"):
         worker.generate_letter(Settings(letter_mode="ai").model_dump(),"",{})
+
+
+@pytest.mark.parametrize("kind", ["otp", "captcha"])
+def test_real_prompt_emits_event_without_logging_answer(monkeypatch, kind):
+    from io import StringIO
+    from types import SimpleNamespace
+    output = StringIO()
+    monkeypatch.setattr(worker, "PROTOCOL", output)
+    monkeypatch.setattr(worker, "INPUT", StringIO(json.dumps({"prompt_id": "prompt-test", "value": "123456"}) + "\n"))
+    monkeypatch.setattr(worker.uuid, "uuid4", lambda: SimpleNamespace(hex="prompt-test"))
+    image = "data:image/png;base64,test" if kind == "captcha" else None
+
+    assert worker.ask(kind, "Введите код", image) == "123456"
+    event = json.loads(output.getvalue())
+    assert event == {"type": "prompt", "kind": kind, "message": "Введите код", "image": image, "prompt_id": "prompt-test"}
+    assert "123456" not in output.getvalue()

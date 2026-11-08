@@ -2320,6 +2320,79 @@ td:first-child {
 .auth-steps > span.current {
   color: #6b9f87;
 }
+.auth-steps > span.done {
+  color: var(--green);
+}
+.auth-confirmation {
+  padding: 20px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.confirmation-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 18px;
+}
+.confirmation-message {
+  color: var(--secondary);
+  font-size: 11px;
+  line-height: 1.8;
+}
+.confirmation-form .field input {
+  max-width: 330px;
+  height: 46px;
+  font-size: 16px;
+  letter-spacing: 2px;
+}
+.confirmation-form .field input::placeholder {
+  font-size: 11px;
+  letter-spacing: 0;
+}
+.confirmation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.modal .confirmation-actions {
+  flex-direction: column;
+}
+.modal .confirmation-form .field input {
+  max-width: none;
+}
+.auth-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 18px;
+  color: var(--secondary);
+}
+.auth-progress > svg {
+  flex-shrink: 0;
+  color: var(--green);
+}
+.auth-progress > div,
+.auth-error > div {
+  flex: 1;
+}
+.auth-progress strong,
+.auth-error strong {
+  font-size: 11px;
+}
+.auth-progress p,
+.auth-error p {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.auth-error {
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
 .hh-tiny {
   background: var(--accent);
   color: #fff;

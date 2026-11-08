@@ -42,6 +42,10 @@ import {
   Zap,
 } from "lucide-react";
 import "./styles.css";
+import {
+  ConfirmationForm,
+  type InputPrompt,
+} from "./components/ConfirmationForm";
 
 type Page =
   | "overview"
@@ -121,12 +125,7 @@ type State = {
   profiles: { id: string; name: string }[];
   jobs: Job[];
   active: Job | null;
-  prompt: {
-    kind: string;
-    message: string;
-    image?: string;
-    prompt_id: string;
-  } | null;
+  prompt: InputPrompt | null;
   wait_seconds: number;
   letter_preview: string | null;
   schedules: Schedule[];
@@ -229,6 +228,7 @@ function App() {
     [level, setLevel] = useState("ALL"),
     [logSearch, setLogSearch] = useState(""),
     [logs, setLogs] = useState<Log[]>([]);
+  const [authCodeSubmitted, setAuthCodeSubmitted] = useState(false);
   const [historySearch, setHistorySearch] = useState(""),
     [historyFilter, setHistoryFilter] = useState("all"),
     [historyPage, setHistoryPage] = useState(0),
@@ -331,6 +331,8 @@ function App() {
     setDirty(false);
     dirtyRef.current = false;
     setApiKey("");
+    setReply("");
+    setAuthCodeSubmitted(false);
     api("/profiles/" + profileId)
       .then((data) => {
         if (!cancelled) {
@@ -403,9 +405,13 @@ function App() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
   useEffect(() => {
+    setReply("");
+  }, [state?.prompt?.prompt_id]);
+  useEffect(() => {
     if (!help && !state?.prompt) return;
     const previous = document.activeElement as HTMLElement | null;
     const modal = document.querySelector<HTMLElement>('[role="dialog"]');
+    if (!modal) return;
     const elements = () =>
       Array.from(
         modal?.querySelectorAll<HTMLElement>(
@@ -432,7 +438,7 @@ function App() {
       document.removeEventListener("keydown", trap);
       if (previous?.isConnected) previous.focus();
     };
-  }, [help, state?.prompt?.prompt_id]);
+  }, [help, page, state?.prompt?.prompt_id]);
   const update = <K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings((s) => (s ? { ...s, [key]: value } : s));
     setDirty(true);
@@ -445,6 +451,18 @@ function App() {
     dirtyRef.current = false;
     await refresh();
   };
+  const confirmPrompt = () =>
+    act(async () => {
+      if (!state?.prompt) return;
+      const prompt = state.prompt;
+      await api("/prompt", "POST", {
+        prompt_id: prompt.prompt_id,
+        value: reply.trim(),
+      });
+      if (prompt.kind === "otp") setAuthCodeSubmitted(true);
+      setReply("");
+      await refresh();
+    });
   const start = (operation: string, resumeId = "") =>
     act(async () => {
       const version = stopVersion.current;
@@ -564,6 +582,17 @@ function App() {
     bumpSchedule = state.schedules.find((x) => x.operation === "bump"),
     applySchedule = state.schedules.find((x) => x.operation === "apply");
   const currentProfileRunning = state.active?.profile_id === profileId;
+  const authActive =
+    currentProfileRunning && state.active?.operation === "auth";
+  const authPrompt = authActive ? state.prompt : null;
+  const lastAuth = state.jobs.find((entry) => entry.operation === "auth");
+  const authStep = authActive
+    ? authPrompt?.kind === "otp" || authCodeSubmitted
+      ? 2
+      : 1
+    : state.has_token
+      ? 3
+      : 1;
   const ratio = Math.min(100, (state.stats.sent_24h / s.daily_limit) * 100);
   const filteredLogs = logs.filter(
     (l) =>
@@ -685,7 +714,10 @@ function App() {
     >
       {filteredLogs.length ? (
         filteredLogs.slice(mini ? -5 : -150).map((log) => (
-          <div className={"log-line log-" + log.level.toLowerCase()} key={log.id}>
+          <div
+            className={"log-line log-" + log.level.toLowerCase()}
+            key={log.id}
+          >
             <time>
               {date(log.at, {
                 hour: "2-digit",
@@ -709,6 +741,17 @@ function App() {
       )}
       <div ref={mini ? undefined : terminalEnd} />
     </div>
+  );
+  const confirmationForm = (prompt: InputPrompt) => (
+    <ConfirmationForm
+      key={prompt.prompt_id}
+      prompt={prompt}
+      value={reply}
+      pending={pending}
+      onChange={setReply}
+      onSubmit={confirmPrompt}
+      onCancel={() => void stop()}
+    />
   );
   const runButton = (wide = false) => (
     <button
@@ -2209,15 +2252,26 @@ function App() {
                     </div>
                   </div>
                   <div className="auth-steps">
-                    <span className="current">
+                    <span
+                      className={authStep === 1 ? "current" : "done"}
+                      aria-current={authStep === 1 ? "step" : undefined}
+                    >
                       1 <strong>Телефон / email</strong>
                     </span>
                     <i />
-                    <span>
+                    <span
+                      className={
+                        authStep === 2 ? "current" : authStep > 2 ? "done" : ""
+                      }
+                      aria-current={authStep === 2 ? "step" : undefined}
+                    >
                       2 <strong>Подтверждение</strong>
                     </span>
                     <i />
-                    <span>
+                    <span
+                      className={authStep === 3 ? "current" : ""}
+                      aria-current={authStep === 3 ? "step" : undefined}
+                    >
                       3 <strong>Готово</strong>
                     </span>
                   </div>
@@ -2233,52 +2287,112 @@ function App() {
                       </div>
                     </div>
                   )}
-                  <form
-                    className="auth-form"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void act(async () => {
-                        const version = stopVersion.current;
-                        await api("/profiles/" + profileId + "/auth", "POST", {
-                          username: username.trim(),
+                  {!authActive && lastAuth?.status === "failed" && (
+                    <div className="warning auth-error" role="alert">
+                      <CircleHelp size={18} />
+                      <div>
+                        <strong>Не удалось завершить вход</strong>
+                        <p>Запросите новый код и повторите подтверждение.</p>
+                      </div>
+                      <button
+                        className="text-button"
+                        onClick={() => go("terminal")}
+                      >
+                        Открыть логи <ArrowRight size={14} />
+                      </button>
+                    </div>
+                  )}
+                  {authActive ? (
+                    authPrompt ? (
+                      <section
+                        className="auth-confirmation"
+                        aria-label="Подтверждение входа в hh.ru"
+                      >
+                        <h2>
+                          {authPrompt.kind === "captcha"
+                            ? "Проверка безопасности"
+                            : "Введите полученный код"}
+                        </h2>
+                        {confirmationForm(authPrompt)}
+                      </section>
+                    ) : (
+                      <div className="auth-progress" role="status">
+                        <Loader2 className="spin" size={20} />
+                        <div>
+                          <strong>
+                            {authCodeSubmitted
+                              ? "Проверяем код…"
+                              : "Запрашиваем код у hh.ru…"}
+                          </strong>
+                          <p>
+                            {authCodeSubmitted
+                              ? "Дождитесь подтверждения входа."
+                              : "Поле ввода появится здесь, как только hh.ru запросит подтверждение."}
+                          </p>
+                        </div>
+                        <button
+                          className="text-button"
+                          onClick={() => void stop()}
+                        >
+                          Отменить
+                        </button>
+                      </div>
+                    )
+                  ) : (
+                    <form
+                      className="auth-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void act(async () => {
+                          const version = stopVersion.current;
+                          setAuthCodeSubmitted(false);
+                          setReply("");
+                          await api(
+                            "/profiles/" + profileId + "/auth",
+                            "POST",
+                            {
+                              username: username.trim(),
+                            },
+                          );
+                          if (version !== stopVersion.current) {
+                            await api("/jobs/stop", "POST");
+                            return;
+                          }
+                          setUsername("");
+                          await refresh();
+                          notify("Авторизация начата. Ожидайте запрос кода.");
                         });
-                        if (version !== stopVersion.current) {
-                          await api("/jobs/stop", "POST");
-                          return;
-                        }
-                        setUsername("");
-                        await refresh();
-                        notify("Авторизация начата. Ожидайте запрос кода.");
-                      });
-                    }}
-                  >
-                    <label className="field">
-                      <span>Телефон или email</span>
-                      <input
-                        autoComplete="username"
-                        placeholder="+7 999 123-45-67 или you@example.com"
-                        required
-                        minLength={3}
-                        maxLength={150}
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                      />
-                    </label>
-                    <button
-                      className="button primary"
-                      disabled={pending || running}
+                      }}
                     >
-                      {pending ? (
-                        <Loader2 className="spin" size={17} />
-                      ) : (
-                        <ArrowRight size={17} />
-                      )}{" "}
-                      Получить код
-                    </button>
-                  </form>
+                      <label className="field">
+                        <span>Телефон или email</span>
+                        <input
+                          autoComplete="username"
+                          placeholder="+7 999 123-45-67 или you@example.com"
+                          required
+                          minLength={3}
+                          maxLength={150}
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
+                        />
+                      </label>
+                      <button
+                        className="button primary"
+                        disabled={pending || running}
+                      >
+                        {pending ? (
+                          <Loader2 className="spin" size={17} />
+                        ) : (
+                          <ArrowRight size={17} />
+                        )}{" "}
+                        Получить код
+                      </button>
+                    </form>
+                  )}
                   <p className="subtle-note">
-                    Код придёт по SMS или email. Если hh.ru запросит капчу, она
-                    появится прямо в панели. Пароль не требуется.
+                    Код придёт по SMS или email. Введите его в поле
+                    подтверждения прямо на этой странице. Капча также появится
+                    здесь. Пароль не требуется.
                   </p>
                   {state.has_token && (
                     <button
@@ -2470,7 +2584,7 @@ function App() {
           </button>
         </div>
       )}
-      {state.prompt && (
+      {state.prompt && !(page === "accounts" && authActive) && (
         <div className="modal-backdrop">
           <section
             className="modal"
@@ -2490,54 +2604,7 @@ function App() {
                 ? "Проверка безопасности"
                 : "Подтвердите вход"}
             </h2>
-            <p>{state.prompt.message}</p>
-            {state.prompt.image && (
-              <img
-                className="captcha-image"
-                src={state.prompt.image}
-                alt="Капча hh.ru — введите символы с изображения"
-              />
-            )}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void act(async () => {
-                  await api("/prompt", "POST", {
-                    prompt_id: state.prompt!.prompt_id,
-                    value: reply,
-                  });
-                  setReply("");
-                  await refresh();
-                });
-              }}
-            >
-              <label className="field">
-                <span>
-                  {state.prompt.kind === "captcha"
-                    ? "Текст с картинки"
-                    : "Одноразовый код"}
-                </span>
-                <input
-                  autoFocus
-                  autoComplete="one-time-code"
-                  value={reply}
-                  onChange={(e) => setReply(e.target.value)}
-                  required
-                  maxLength={300}
-                />
-              </label>
-              <button className="button primary wide" disabled={pending}>
-                Подтвердить <ArrowRight size={16} />
-              </button>
-              <button
-                type="button"
-                className="button wide"
-                onClick={() => stop()}
-                disabled={pending}
-              >
-                Отменить задачу
-              </button>
-            </form>
+            {confirmationForm(state.prompt)}
           </section>
         </div>
       )}

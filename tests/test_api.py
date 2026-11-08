@@ -135,12 +135,12 @@ def test_schedule_constraints_and_local_daily_limit(client):
 def test_prompt_round_trip_and_no_otp_in_logs(client, monkeypatch):
     original = asyncio.create_subprocess_exec
     script = '''import sys,json
+from backend.worker import ask, emit
 payload=json.loads(sys.stdin.readline())
-print(json.dumps({"type":"prompt","kind":"otp","message":"Enter code","prompt_id":"prompt1"}),flush=True)
-answer=json.loads(sys.stdin.readline())
-if answer["value"]!="secret-otp-123": sys.exit(1)
-print(json.dumps({"type":"account","account":{"id":"1","name":"Test User"},"resumes":[]}),flush=True)
-print(json.dumps({"type":"done","status":"completed"}),flush=True)
+answer=ask("otp", "Введите код из SMS или email")
+if answer!="secret-otp-123": sys.exit(1)
+emit("account", account={"id":"1","name":"Test User"}, resumes=[])
+emit("done", status="completed")
 '''
     async def fake_worker(*args, **kwargs):
         return await original(sys.executable, "-u", "-c", script, **kwargs)
@@ -150,9 +150,12 @@ print(json.dumps({"type":"done","status":"completed"}),flush=True)
         if profile(client)["prompt"]:
             break
         time.sleep(.02)
-    assert profile(client)["prompt"]["kind"]=="otp"
+    prompt = profile(client)["prompt"]
+    assert prompt is not None, "The real worker prompt must reach the browser state"
+    assert prompt["kind"]=="otp"
+    assert profile(client)["jobs"][0]["status"]=="waiting"
     assert client.post("/api/prompt",json={"prompt_id":"stale","value":"123"}).status_code==409
-    assert client.post("/api/prompt",json={"prompt_id":"prompt1","value":"secret-otp-123"}).status_code==200
+    assert client.post("/api/prompt",json={"prompt_id":prompt["prompt_id"],"value":"secret-otp-123"}).status_code==200
     assert wait_job(client)["status"]=="completed"
     assert profile(client)["profile"]["account"]["name"]=="Test User"
     assert "secret-otp-123" not in client.get(f"/api/profiles/{client.pid}/logs").text

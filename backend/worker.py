@@ -21,8 +21,8 @@ PROTOCOL = sys.stdout
 INPUT = sys.stdin
 
 
-def emit(kind, **data):
-    PROTOCOL.write(json.dumps({"type": kind, **data}, ensure_ascii=False) + "\n")
+def emit(event_type, /, **data):
+    PROTOCOL.write(json.dumps({"type": event_type, **data}, ensure_ascii=False) + "\n")
     PROTOCOL.flush()
 
 
