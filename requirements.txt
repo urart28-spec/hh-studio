@@ -1,0 +1,9 @@
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+httpx>=0.28,<1
+cryptography>=50.0.2,<51
+pillow>=12.3,<13
+requests[socks]>=2.32,<3
+tomli-w>=1.2,<2
+brotli>=1.2,<2
+psutil>=6,<8

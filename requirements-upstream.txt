@@ -1,0 +1,2 @@
+# Audited adapter target. Install after requirements.txt with --no-deps.
+hh-applicant-tool @ git+https://github.com/s3rgeym/hh-applicant-tool.git@1dd038113394ebc49530ef734034266c9073fa65
