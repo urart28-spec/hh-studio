@@ -1,6 +1,9 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+AIProvider = Literal["openai", "anthropic", "gemini", "deepseek", "gigachat"]
+GigaChatScope = Literal["GIGACHAT_API_PERS", "GIGACHAT_API_B2B", "GIGACHAT_API_CORP"]
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -23,8 +26,10 @@ class Settings(StrictModel):
     dry_run: bool = True
     letter_mode: Literal["static", "ai"] = "static"
     cover_letter: str = Field(default="Здравствуйте! Меня заинтересовала вакансия «{vacancy_name}» в {company_name}. Буду рад обсудить, как мой опыт поможет вашей команде.", max_length=10000)
-    provider: Literal["openai", "anthropic", "gemini"] = "openai"
+    provider: AIProvider = "openai"
     model: str = Field(default="gpt-4.1-mini", min_length=1, max_length=100)
+    gigachat_scope: GigaChatScope = "GIGACHAT_API_PERS"
+    gigachat_ca_bundle: str = Field(default="", max_length=1000, pattern=r"^[^\r\n\x00]*$")
     system_prompt: str = Field(default="Напиши короткое сопроводительное письмо на русском. Используй только указанные факты об опыте. Не придумывай навыки. Верни только текст письма.", max_length=15000)
     experience_context: str = Field(default="", max_length=20000)
 
@@ -57,7 +62,7 @@ class JobStart(StrictModel):
 
 class SecretUpdate(StrictModel):
     api_key: str = Field(max_length=1000)
-    provider: Literal["openai", "anthropic", "gemini"]
+    provider: AIProvider
 
 
 class ScheduleUpdate(StrictModel):

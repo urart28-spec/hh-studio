@@ -169,3 +169,35 @@ def test_interrupted_jobs_recovered_after_restart(tmp_path):
     store=Store(tmp_path)
     assert store.rows("SELECT status FROM jobs")[0]["status"]=="interrupted"
     store.close()
+
+
+@pytest.mark.parametrize("provider,model", [("deepseek", "deepseek-flash"), ("gigachat", "GigaChat-3-Ultra")])
+def test_new_provider_settings_and_secrets(client, provider, model):
+    settings = profile(client)["profile"]["settings"]
+    settings.update(provider=provider, model=model, letter_mode="ai")
+    assert client.put(f"/api/profiles/{client.pid}/settings", json=settings).status_code == 200
+    secret = "disposable-provider-test-key"
+    assert client.put(f"/api/profiles/{client.pid}/secret", json={"provider":provider,"api_key":secret}).status_code == 200
+    result = profile(client)["profile"]
+    assert result["settings"]["provider"] == provider
+    assert result["has_api_key"][provider]
+    assert secret not in json.dumps(result)
+
+
+def test_old_profiles_receive_new_settings_without_losing_search(client):
+    legacy = profile(client)["profile"]["settings"]
+    legacy.pop("gigachat_scope")
+    legacy.pop("gigachat_ca_bundle")
+    legacy["text"] = "My saved search"
+    client.app.state.store.execute("UPDATE profiles SET settings=? WHERE id=?", (json.dumps(legacy), client.pid))
+    migrated = profile(client)["profile"]["settings"]
+    assert migrated["text"] == "My saved search"
+    assert migrated["gigachat_scope"] == "GIGACHAT_API_PERS" and migrated["gigachat_ca_bundle"] == ""
+    migrated["gigachat_scope"] = "unknown"
+    assert client.put(f"/api/profiles/{client.pid}/settings", json=migrated).status_code == 422
+
+
+def test_basic_and_bearer_credentials_are_redacted_before_header_fields(client):
+    for scheme in ("Basic", "Bearer"):
+        result = client.app.state.store.redact(f"Authorization: {scheme} disposable-unknown-secret")
+        assert "disposable-unknown-secret" not in result

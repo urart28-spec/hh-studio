@@ -55,6 +55,8 @@ class Store:
         p = dict(row)
         for field in ("settings", "account", "resumes"):
             p[field] = json.loads(p[field])
+        # Fill new provider settings for profiles created by older versions.
+        p["settings"] = Settings.model_validate(p["settings"]).model_dump()
         p["has_api_key"] = {r["provider"]: True for r in self.rows("SELECT provider FROM secrets WHERE profile_id=?", (profile_id,))}
         return p
 
@@ -86,8 +88,8 @@ class Store:
             value = self.vault.decrypt(row["value"].encode()).decode()
             if value:
                 text = text.replace(value, "[СКРЫТО]")
+        text = re.sub(r"(?i)\b(Bearer|Basic)\s+[^\s\"']+", r"\1 [СКРЫТО]", text)
         text = re.sub(r"(?i)(access_token|refresh_token|api_key|authorization|password|code|username)([\"'\s:=]+)[^\s,}\"']+", r"\1\2[СКРЫТО]", text)
-        text = re.sub(r"(?i)\bBearer\s+[^\s\"']+", "Bearer [СКРЫТО]", text)
         text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
         return text[:12000]
 

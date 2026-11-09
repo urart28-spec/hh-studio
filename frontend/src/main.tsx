@@ -43,6 +43,12 @@ import {
 } from "lucide-react";
 import "./styles.css";
 import {
+  AIProviderFields,
+  AI_PROVIDERS,
+  type AIProvider,
+  type GigaChatScope,
+} from "./components/AIProviderFields";
+import {
   ConfirmationForm,
   type InputPrompt,
 } from "./components/ConfirmationForm";
@@ -73,8 +79,10 @@ type Settings = {
   dry_run: boolean;
   letter_mode: string;
   cover_letter: string;
-  provider: string;
+  provider: AIProvider;
   model: string;
+  gigachat_scope: GigaChatScope;
+  gigachat_ca_bundle: string;
   system_prompt: string;
   experience_context: string;
 };
@@ -582,6 +590,7 @@ function App() {
     bumpSchedule = state.schedules.find((x) => x.operation === "bump"),
     applySchedule = state.schedules.find((x) => x.operation === "apply");
   const currentProfileRunning = state.active?.profile_id === profileId;
+  const providerInfo = AI_PROVIDERS[s.provider];
   const authActive =
     currentProfileRunning && state.active?.operation === "auth";
   const authPrompt = authActive ? state.prompt : null;
@@ -1557,39 +1566,32 @@ function App() {
                   ) : (
                     <>
                       <div className="form-grid">
-                        <label className="field">
-                          <span>AI-провайдер</span>
-                          <select
-                            value={s.provider}
-                            onChange={(e) => {
-                              update("provider", e.target.value);
-                              update(
-                                "model",
-                                {
-                                  openai: "gpt-4.1-mini",
-                                  anthropic: "claude-sonnet-4-5",
-                                  gemini: "gemini-2.5-flash",
-                                }[e.target.value] || "",
-                              );
-                              setApiKey("");
-                            }}
-                          >
-                            <option value="openai">OpenAI</option>
-                            <option value="anthropic">Anthropic</option>
-                            <option value="gemini">Google Gemini</option>
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span>ID модели</span>
-                          <input
-                            value={s.model}
-                            onChange={(e) => update("model", e.target.value)}
-                            maxLength={100}
-                          />
-                        </label>
+                        <AIProviderFields
+                          provider={s.provider}
+                          model={s.model}
+                          gigachatScope={
+                            s.gigachat_scope || "GIGACHAT_API_PERS"
+                          }
+                          caBundle={s.gigachat_ca_bundle || ""}
+                          onProviderChange={(provider) => {
+                            update("provider", provider);
+                            update(
+                              "model",
+                              AI_PROVIDERS[provider].defaultModel,
+                            );
+                            setApiKey("");
+                          }}
+                          onModelChange={(value) => update("model", value)}
+                          onScopeChange={(value) =>
+                            update("gigachat_scope", value)
+                          }
+                          onCaBundleChange={(value) =>
+                            update("gigachat_ca_bundle", value)
+                          }
+                        />
                         <label className="field full">
                           <span>
-                            API-ключ{" "}
+                            {providerInfo.keyLabel}{" "}
                             <b
                               className={
                                 "small-pill " +
@@ -1612,7 +1614,7 @@ function App() {
                               placeholder={
                                 p.has_api_key[s.provider]
                                   ? "Введите новый ключ для замены"
-                                  : "Вставьте API-ключ провайдера"
+                                  : "Вставьте " + providerInfo.keyLabel
                               }
                             />
                             <button
@@ -1656,6 +1658,7 @@ function App() {
                               </button>
                             )}
                           </div>
+                          <small>{providerInfo.keyHelp}</small>
                         </label>
                         <label className="field full">
                           <span>Системный промпт</span>

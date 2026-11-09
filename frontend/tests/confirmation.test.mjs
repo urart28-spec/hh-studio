@@ -35,11 +35,29 @@ writeFileSync(
     },
   }).outputText,
 );
+const providerModule = join(temporary, "AIProviderFields.mjs");
+writeFileSync(
+  providerModule,
+  ts.transpileModule(
+    readFileSync(join(project, "src/components/AIProviderFields.tsx"), "utf8"),
+    {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
+        jsx: ts.JsxEmit.ReactJSX,
+      },
+    },
+  ).outputText,
+);
 after(() => {
   unlinkSync(generated);
+  unlinkSync(providerModule);
   rmdirSync(temporary);
 });
 const { ConfirmationForm } = await import(pathToFileURL(generated).href);
+const { AIProviderFields, AI_PROVIDERS } = await import(
+  pathToFileURL(providerModule).href
+);
 const defaults = {
   prompt: {
     kind: "otp",
@@ -56,6 +74,55 @@ const render = (props = {}) =>
   renderToStaticMarkup(
     createElement(ConfirmationForm, { ...defaults, ...props }),
   );
+
+const renderProvider = (provider) =>
+  renderToStaticMarkup(
+    createElement(AIProviderFields, {
+      provider,
+      model: AI_PROVIDERS[provider].defaultModel,
+      gigachatScope: "GIGACHAT_API_PERS",
+      caBundle: "",
+      onProviderChange() {},
+      onModelChange() {},
+      onScopeChange() {},
+      onCaBundleChange() {},
+    }),
+  );
+
+test("provider selector exposes DeepSeek and GigaChat while retaining existing providers", () => {
+  const html = renderProvider("deepseek");
+  for (const provider of [
+    "openai",
+    "anthropic",
+    "gemini",
+    "deepseek",
+    "gigachat",
+  ]) {
+    assert.match(html, new RegExp(`<option[^>]*value="${provider}"`));
+  }
+  assert.match(html, /value="deepseek" selected=""/);
+  assert.match(html, /value="deepseek-flash"/);
+  assert.doesNotMatch(html, /Тип доступа GigaChat/);
+});
+
+test("GigaChat exposes scope and certificate settings only when selected", () => {
+  const html = renderProvider("gigachat");
+  assert.match(html, /value="gigachat" selected=""/);
+  for (const scope of [
+    "GIGACHAT_API_PERS",
+    "GIGACHAT_API_B2B",
+    "GIGACHAT_API_CORP",
+  ]) {
+    assert.match(html, new RegExp(`value="${scope}"`));
+  }
+  assert.match(html, /Путь к CA-сертификату/);
+  assert.match(
+    html,
+    /https:\/\/developers.sber.ru\/docs\/ru\/gigachat\/certificates/,
+  );
+  assert.match(html, /value="GigaChat-3-Ultra"/);
+  assert.match(AI_PROVIDERS.gigachat.keyLabel, /Authorization Key/);
+});
 
 test("OTP has a labeled, enabled input with SMS autofill", () => {
   const html = render();
