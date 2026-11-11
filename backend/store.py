@@ -19,6 +19,12 @@ class Store:
         self.root = root.resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.root.chmod(0o700)
+        self.ocr_defaults = {}
+        ocr_defaults_path = self.root / "ocr-settings.json"
+        if ocr_defaults_path.exists():
+            data = json.loads(ocr_defaults_path.read_text(encoding="utf-8"))
+            self.ocr_defaults = {key: value for key, value in data.items() if key.startswith("captcha_ocr_")}
+            Settings.model_validate(self.ocr_defaults)
         key = self.root / ".vault-key"
         if not key.exists():
             key.write_bytes(Fernet.generate_key())
@@ -55,14 +61,14 @@ class Store:
         p = dict(row)
         for field in ("settings", "account", "resumes"):
             p[field] = json.loads(p[field])
-        # Fill new provider settings for profiles created by older versions.
-        p["settings"] = Settings.model_validate(p["settings"]).model_dump()
+        # Explicit profile choices override machine-local installation defaults.
+        p["settings"] = Settings.model_validate({**self.ocr_defaults, **p["settings"]}).model_dump()
         p["has_api_key"] = {r["provider"]: True for r in self.rows("SELECT provider FROM secrets WHERE profile_id=?", (profile_id,))}
         return p
 
     def create_profile(self, name):
         pid = uuid.uuid4().hex
-        self.execute("INSERT INTO profiles VALUES(?,?,?,?,?,?)", (pid, name.strip(), Settings().model_dump_json(), "null", "[]", None))
+        self.execute("INSERT INTO profiles VALUES(?,?,?,?,?,?)", (pid, name.strip(), Settings.model_validate(self.ocr_defaults).model_dump_json(), "null", "[]", None))
         return self.profile(pid)
 
     def profile_dir(self, pid):

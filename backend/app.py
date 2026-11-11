@@ -12,7 +12,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from .jobs import JobManager
-from .models import AuthStart, JobStart, ProfileCreate, PromptReply, ScheduleUpdate, SecretUpdate, Settings
+from .models import AuthStart, JobStart, ProfileCreate, PromptAction, PromptReply, ScheduleUpdate, SecretUpdate, Settings
+from . import ocr
 from .store import Store
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -139,6 +140,22 @@ def create_app(data_dir=None):
     @app.post("/api/prompt")
     async def reply_prompt(body: PromptReply):
         await app.state.manager.reply(body.prompt_id, body.value)
+        return {"ok": True}
+
+    @app.get("/api/profiles/{pid}/ocr")
+    async def ocr_status(pid: str):
+        return await ocr.status(app.state.store.profile(pid)["settings"])
+
+    @app.post("/api/prompt/ocr/retry")
+    async def retry_ocr(body: PromptAction):
+        async with app.state.manager.lock:
+            app.state.manager.start_ocr(body.prompt_id)
+        return {"ok": True}
+
+    @app.post("/api/prompt/ocr/cancel")
+    async def cancel_ocr(body: PromptAction):
+        async with app.state.manager.lock:
+            app.state.manager.cancel_ocr(body.prompt_id)
         return {"ok": True}
 
     @app.post("/api/lease/{tab}")

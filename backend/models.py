@@ -32,6 +32,12 @@ class Settings(StrictModel):
     gigachat_ca_bundle: str = Field(default="", max_length=1000, pattern=r"^[^\r\n\x00]*$")
     system_prompt: str = Field(default="Напиши короткое сопроводительное письмо на русском. Используй только указанные факты об опыте. Не придумывай навыки. Верни только текст письма.", max_length=15000)
     experience_context: str = Field(default="", max_length=20000)
+    captcha_ocr_enabled: bool = False
+    captcha_ocr_auto_submit: bool = False
+    captcha_ocr_model: str = Field(default="hh-paddleocr:0.9b-q4_k_m", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$")
+    captcha_ocr_port: int = Field(default=11434, ge=1024, le=65535)
+    captcha_ocr_keep_alive: int = Field(default=60, ge=0, le=300)
+    captcha_ocr_timeout: int = Field(default=90, ge=5, le=300)
 
     @model_validator(mode="after")
     def validate_limits(self):
@@ -53,6 +59,10 @@ class AuthStart(StrictModel):
 class PromptReply(StrictModel):
     prompt_id: str = Field(min_length=1, max_length=64)
     value: str = Field(min_length=1, max_length=300, pattern=r"^[^\r\n]+$")
+
+
+class PromptAction(StrictModel):
+    prompt_id: str = Field(min_length=1, max_length=64)
 
 
 class JobStart(StrictModel):

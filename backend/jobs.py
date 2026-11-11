@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import psutil
 from .store import now
+from . import ocr
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +27,8 @@ class JobManager:
         self.wait_until = None
         self.letter = None
         self.letter_profile_id = None
+        self.ocr_task = None
+        self.active_settings = None
 
     def heartbeat(self, tab):
         self.leases[tab] = time.monotonic()
@@ -58,6 +61,7 @@ class JobManager:
             self.process = await asyncio.create_subprocess_exec(sys.executable, "-u", "-m", "backend.worker", stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, cwd=str(ROOT), env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}, limit=2**21, **flags)
             self.store.execute("INSERT INTO jobs(id,profile_id,operation,status,started_at) VALUES(?,?,?,?,?)", (jid, pid, operation, "running", now()))
             self.active = {"id": jid, "profile_id": pid, "operation": operation}
+            self.active_settings = settings
             self.prompt = self.wait_until = self.letter = None
             self.store.log(pid, jid, f"Запуск: {operation}" + (" • DRY RUN" if operation == "apply" and settings["dry_run"] else ""))
             self.process.stdin.write((json.dumps(payload, ensure_ascii=False) + "\n").encode())
@@ -82,6 +86,8 @@ class JobManager:
                     self.prompt = event
                     self.store.execute("UPDATE jobs SET status='waiting' WHERE id=?", (jid,))
                     self.store.log(pid, jid, "Требуется ввод: " + event["message"], "WARNING")
+                    if event.get("kind") == "captcha" and settings_enabled(self.active_settings):
+                        self.start_ocr(event["prompt_id"])
                 elif kind == "progress":
                     self.store.execute("UPDATE jobs SET processed=?,sent=?,detail=? WHERE id=?", (event["processed"], event["sent"], event.get("title", ""), jid))
                 elif kind == "application":
@@ -103,6 +109,7 @@ class JobManager:
             self.store.log(pid, jid, f"Ошибка чтения процесса: {error}", "ERROR")
             await self._terminate(process)
         finally:
+            self._cancel_ocr_task()
             row = self.store.rows("SELECT status FROM jobs WHERE id=?", (jid,))[0]
             if row["status"] == "stopping":
                 status = "stopped"
@@ -111,11 +118,53 @@ class JobManager:
             if process.stdin:
                 process.stdin.close()
             self.active = self.process = self.prompt = self.wait_until = None
+            self.active_settings = None
+
+    def _cancel_ocr_task(self):
+        task = self.ocr_task
+        self.ocr_task = None
+        if task and task is not asyncio.current_task():
+            task.cancel()
+
+    def start_ocr(self, prompt_id):
+        if not self.prompt or self.prompt.get("prompt_id") != prompt_id or self.prompt.get("kind") != "captcha":
+            raise ValueError("Запрос капчи уже завершён")
+        if not settings_enabled(self.active_settings):
+            raise ValueError("Включите локальный OCR в настройках профиля")
+        self._cancel_ocr_task()
+        self.prompt.pop("suggested_value", None)
+        self.prompt.update(ocr_status="recognizing", ocr_auto_submit=self.active_settings["captcha_ocr_auto_submit"], ocr_error=None)
+        self.ocr_task = asyncio.create_task(self._recognize_prompt(prompt_id, self.prompt.get("image"), dict(self.active_settings)))
+
+    async def _recognize_prompt(self, prompt_id, image, settings):
+        try:
+            answer = await ocr.recognize(image, settings)
+            if self.ocr_task is not asyncio.current_task() or not self.prompt or self.prompt.get("prompt_id") != prompt_id:
+                return
+            self.prompt.update(ocr_status="ready", suggested_value=answer)
+            if settings["captcha_ocr_auto_submit"]:
+                # Let the live form show the recognized text and allow manual takeover.
+                await asyncio.sleep(1.5)
+                if self.ocr_task is asyncio.current_task() and self.prompt and self.prompt.get("prompt_id") == prompt_id and self.prompt.get("ocr_status") == "ready":
+                    await self.reply(prompt_id, answer)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            if self.ocr_task is asyncio.current_task() and self.prompt and self.prompt.get("prompt_id") == prompt_id:
+                message = str(error) if isinstance(error, ValueError) else "Локальный OCR завершился с ошибкой. Введите текст вручную."
+                self.prompt.update(ocr_status="failed", ocr_error=message)
+
+    def cancel_ocr(self, prompt_id):
+        if not self.prompt or self.prompt.get("prompt_id") != prompt_id or self.prompt.get("kind") != "captcha":
+            raise ValueError("Запрос капчи уже завершён")
+        self._cancel_ocr_task()
+        self.prompt.update(ocr_status="manual", ocr_auto_submit=False, ocr_error=None)
 
     async def reply(self, prompt_id, value):
         async with self.lock:
             if not self.prompt or self.prompt["prompt_id"] != prompt_id or not self.process or self.process.returncode is not None:
                 raise ValueError("Запрос ввода уже завершён")
+            self._cancel_ocr_task()
             self.process.stdin.write((json.dumps({"prompt_id": prompt_id, "value": value}) + "\n").encode())
             await self.process.stdin.drain()
             self.prompt = None
@@ -158,6 +207,7 @@ class JobManager:
             if emergency:
                 self.store.execute("UPDATE schedules SET enabled=0")
             if self.process:
+                self._cancel_ocr_task()
                 self.store.execute("UPDATE jobs SET status='stopping' WHERE id=?", (self.active["id"],))
                 await self._terminate(self.process)
                 if self.reader:
@@ -179,3 +229,7 @@ class JobManager:
                     await self.start(row["profile_id"], row["operation"])
                 except Exception as error:
                     self.store.log(row["profile_id"], "scheduler", str(error), "WARNING")
+
+
+def settings_enabled(settings):
+    return bool(settings and settings.get("captcha_ocr_enabled"))

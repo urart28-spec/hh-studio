@@ -52,6 +52,11 @@ import {
   ConfirmationForm,
   type InputPrompt,
 } from "./components/ConfirmationForm";
+import {
+  LocalOCRSettings,
+  type OCRConfig,
+  type OCRStatus,
+} from "./components/LocalOCRSettings";
 
 type Page =
   | "overview"
@@ -62,7 +67,7 @@ type Page =
   | "terminal"
   | "accounts"
   | "settings";
-type Settings = {
+type Settings = OCRConfig & {
   text: string;
   area: string;
   salary: number;
@@ -237,6 +242,7 @@ function App() {
     [logSearch, setLogSearch] = useState(""),
     [logs, setLogs] = useState<Log[]>([]);
   const [authCodeSubmitted, setAuthCodeSubmitted] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState<OCRStatus | null>(null);
   const [historySearch, setHistorySearch] = useState(""),
     [historyFilter, setHistoryFilter] = useState("all"),
     [historyPage, setHistoryPage] = useState(0),
@@ -415,6 +421,15 @@ function App() {
   useEffect(() => {
     setReply("");
   }, [state?.prompt?.prompt_id]);
+  useEffect(() => {
+    const suggestion = state?.prompt?.suggested_value;
+    if (state?.prompt?.kind === "captcha" && suggestion) {
+      setReply(current => current || suggestion);
+    }
+  }, [state?.prompt?.prompt_id, state?.prompt?.suggested_value]);
+  useEffect(() => {
+    setOcrStatus(null);
+  }, [profileId]);
   useEffect(() => {
     if (!help && !state?.prompt) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -760,6 +775,15 @@ function App() {
       onChange={setReply}
       onSubmit={confirmPrompt}
       onCancel={() => void stop()}
+      onCancelRecognition={() => act(async () => {
+        await api("/prompt/ocr/cancel", "POST", { prompt_id: prompt.prompt_id });
+        await refresh();
+      })}
+      onRetryRecognition={() => act(async () => {
+        setReply("");
+        await api("/prompt/ocr/retry", "POST", { prompt_id: prompt.prompt_id });
+        await refresh();
+      })}
     />
   );
   const runButton = (wide = false) => (
@@ -2490,6 +2514,21 @@ function App() {
                     </button>
                   </div>
                 </section>
+                <LocalOCRSettings
+                  settings={s}
+                  pending={pending}
+                  status={ocrStatus}
+                  onChange={(key, value) => update(key, value as Settings[typeof key])}
+                  onSave={() => act(async () => {
+                    await save();
+                    setOcrStatus(null);
+                    notify("Настройки локального OCR сохранены");
+                  })}
+                  onCheck={() => act(async () => {
+                    await save();
+                    setOcrStatus(await api(`/profiles/${profileId}/ocr`));
+                  })}
+                />
                 <section className="card">
                   <div className="card-heading">
                     <h2>Внешний вид</h2>

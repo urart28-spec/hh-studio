@@ -2330,6 +2330,51 @@ td:first-child {
   gap: 16px;
   margin-top: 18px;
 }
+.ocr-prompt-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.ocr-prompt-status > span {
+  flex: 1 1 180px;
+}
+.ocr-prompt-status > svg {
+  flex-shrink: 0;
+}
+.ocr-prompt-status .text-button {
+  min-height: 32px;
+  font-size: 13px;
+}
+.local-ocr-settings .ocr-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 18px;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.ocr-checkbox input[type="checkbox"] {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 2px 0 0;
+  padding: 0;
+  accent-color: var(--green);
+}
+.local-ocr-settings .subtle-note {
+  color: var(--secondary);
+}
 .confirmation-message {
   color: var(--secondary);
   font-size: 11px;

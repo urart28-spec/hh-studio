@@ -36,6 +36,11 @@ writeFileSync(
   }).outputText,
 );
 const providerModule = join(temporary, "AIProviderFields.mjs");
+const ocrModule = join(temporary, "LocalOCRSettings.mjs");
+writeFileSync(ocrModule, ts.transpileModule(
+  readFileSync(join(project, "src/components/LocalOCRSettings.tsx"), "utf8"),
+  { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX } },
+).outputText);
 writeFileSync(
   providerModule,
   ts.transpileModule(
@@ -52,9 +57,11 @@ writeFileSync(
 after(() => {
   unlinkSync(generated);
   unlinkSync(providerModule);
+  unlinkSync(ocrModule);
   rmdirSync(temporary);
 });
 const { ConfirmationForm } = await import(pathToFileURL(generated).href);
+const { LocalOCRSettings } = await import(pathToFileURL(ocrModule).href);
 const { AIProviderFields, AI_PROVIDERS } = await import(
   pathToFileURL(providerModule).href
 );
@@ -184,4 +191,43 @@ test("prompt messages are escaped and never rendered as HTML", () => {
   });
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /&lt;script&gt;/);
+});
+
+test("automatic OCR blocks manual submission while keeping manual takeover available", () => {
+  const prompt = { ...defaults.prompt, kind: "captcha", ocr_status: "recognizing", ocr_auto_submit: true };
+  const html = render({ prompt, onCancelRecognition() {} });
+  assert.match(html, /Распознаём локально/);
+  assert.match(html, /Ввести вручную/);
+  assert.match(html, /<input[^>]*disabled=""/);
+  assert.match(html, /<button type="submit"[^>]*disabled=""/);
+  let submitted = 0;
+  ConfirmationForm({ ...defaults, prompt, value: "текст", onSubmit: () => submitted++ })
+    .props.onSubmit({ preventDefault() {} });
+  assert.equal(submitted, 0);
+  const otp = render({ prompt: { ...prompt, kind: "otp" } });
+  assert.doesNotMatch(otp, /Распознаём локально/);
+  assert.doesNotMatch(otp.match(/<input[^>]+>/)[0], /disabled/);
+});
+
+test("OCR failure leaves the field and retry available", () => {
+  const html = render({
+    prompt: { ...defaults.prompt, kind: "captcha", ocr_status: "failed", ocr_auto_submit: true, ocr_error: "Введите вручную" },
+    onRetryRecognition() {},
+  });
+  assert.match(html, /Введите вручную/);
+  assert.match(html, /Распознать ещё раз/);
+  assert.doesNotMatch(html.match(/<input[^>]+>/)[0], /disabled/);
+});
+
+test("local OCR settings default to on-demand loading and one-minute idle unload", () => {
+  const html = renderToStaticMarkup(createElement(LocalOCRSettings, {
+    settings: {}, pending: false, status: { available: true, model: "local-model", loaded: false },
+    onChange() {}, onCheck() {}, onSave() {},
+  }));
+  assert.match(html, /value="60" selected=""/);
+  assert.match(html, /Сразу после ответа/);
+  assert.match(html, /Проверка подключения её не загружает/);
+  assert.match(html, /Выгружена, загрузится по запросу/);
+  assert.match(html, /value="11434"/);
+  assert.doesNotMatch(html, /<input[^>]*type="checkbox"[^>]*checked=""/);
 });

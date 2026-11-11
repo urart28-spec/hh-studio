@@ -21,3 +21,4 @@ artifacts/
 token.json
 cookies.txt
 *.egg-info/
+*.gguf
